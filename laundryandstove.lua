@@ -1,4 +1,4 @@
--- Hyper-optimized: Pre-calculates ALL static positions
+-- Pre-calculates ALL static positions
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
@@ -47,7 +47,7 @@ local function safeDestroy(obj)
     if obj then pcall(obj.Destroy, obj) end
 end
 
--- GUI creation unchanged
+-- GUI creation
 local function createGUI()
     local screenGui = Instance.new("ScreenGui")
     screenGui.Name = "WashingMachineGUI"
@@ -182,7 +182,7 @@ local function initialize()
     end
 end
 
--- Optimized spam (unchanged)
+-- Optimized spam
 local function continuousSpam(prompt, totalTime)
     local startTime = os_clock()
     local inputHoldBegin = prompt.InputHoldBegin
@@ -217,14 +217,14 @@ local function processStove()
     continuousSpam(data.prompt, SETTINGS.STOVE_TOTAL_TIME)
 end
 
--- Main loop is now pure action, zero calculations
+-- Main loop is pure action, zero calculations
 local function mainLoop()
     if #washingMachines == 0 then return end
     
     camera.CameraType = Enum.CameraType.Scriptable
     
     while isRunning do
-        -- Process 2 machines (original behavior)
+        -- Process 2 machines
         local idx = currentLaundryIndex
         for i = 1, 2 do
             local machine = washingMachines[idx]
@@ -257,4 +257,5 @@ button.MouseButton1Click:Connect(function()
         currentLaundryIndex = 1
         task_spawn(mainLoop)
     end
+
 end)
