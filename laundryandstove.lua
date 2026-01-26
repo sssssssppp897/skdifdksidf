@@ -1,3 +1,4 @@
+-- Optimized & trimmed version (assumes static world & player never resets)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
@@ -22,7 +23,7 @@ local SETTINGS = {
     DOOR_OFFSET = Vector3.new(0, -5.5, 0),
     CAMERA_HEIGHT_ABOVE_PROMPT = 5,
     STOVE_CAMERA_HEIGHT = 2,
-    LAUDRY_TOTAL_TIME = 2.5,
+    LAUNDRY_TOTAL_TIME = 2.5,
     STOVE_TOTAL_TIME = 0.01,
     ACTIVATION_DELAY = 0.01,
     LAUNDRY_TELEPORT_POS = Vector3.new(506, 130, -446),
@@ -36,18 +37,14 @@ local STOVE_CAM_OFFSET = Vector3.new(0, SETTINGS.STOVE_CAMERA_HEIGHT, 0)
 local LAUNDRY_CAM_OFFSET = Vector3.new(0, SETTINGS.CAMERA_HEIGHT_ABOVE_PROMPT, 0)
 
 local washingMachines = {}
-local stoveData = {}
-local MIDDLE_TELEPORT_POS = nil
-local MIDDLE_CAMERA_POS = nil
-local MIDDLE_CAMERA_LOOKAT = nil
-local middlePlatform = nil
+local stoveData = nil
+local MIDDLE_TELEPORT_POS, MIDDLE_CAMERA_POS, MIDDLE_CAMERA_LOOKAT, middlePlatform
 local originalCameraType = camera.CameraType
 local isRunning = false
 local currentLaundryIndex = 1
 
 local cameraTargetCFrame = nil
-local cameraConnection = nil
-local lastCameraTarget = nil
+local cameraConnection
 
 local function createGUI()
     local screenGui = Instance.new("ScreenGui")
@@ -76,53 +73,33 @@ local function createGUI()
     laundryButton.Parent = screenGui
 
     laundryButton.MouseButton1Click:Connect(function()
-        if humanoidRootPart and humanoidRootPart.Parent then
-            humanoidRootPart.CFrame = CFrame.new(SETTINGS.LAUNDRY_TELEPORT_POS)
-        end
+        humanoidRootPart.CFrame = CFrame.new(SETTINGS.LAUNDRY_TELEPORT_POS)
     end)
 
     return button
 end
 
-local function findFloor()
-    local targetSize = Vector3.new(136.029, 0.849987, 217.418)
-    for i = 1, #FLOOR_PATH:GetChildren() do
-        local child = FLOOR_PATH:GetChildren()[i]
-        if child and child:IsA("BasePart") then
-            local size = child.Size
-            if math_abs(size.X - targetSize.X) <= 2 and
-               math_abs(size.Y - targetSize.Y) <= 0.1 and
-               math_abs(size.Z - targetSize.Z) <= 2 then
+local function findBySize(container, targetSize, tol)
+    for _, child in ipairs(container:GetChildren()) do
+        if child:IsA("BasePart") then
+            local s = child.Size
+            if math_abs(s.X - targetSize.X) <= (tol.X or 0)
+            and math_abs(s.Y - targetSize.Y) <= (tol.Y or 0)
+            and math_abs(s.Z - targetSize.Z) <= (tol.Z or 0) then
                 return child
             end
         end
     end
-    return nil
-end
-
-local function findLaundry()
-    local targetSize = Vector3.new(62.3, 0.15, 34.8)
-    for i = 1, #LAUNDRY_PATH:GetChildren() do
-        local child = LAUNDRY_PATH:GetChildren()[i]
-        if child and child:IsA("BasePart") then
-            local size = child.Size
-            if math_abs(size.X - targetSize.X) <= 0.5 and
-               math_abs(size.Y - targetSize.Y) <= 0.01 and
-               math_abs(size.Z - targetSize.Z) <= 0.5 then
-                return child
-            end
-        end
-    end
-    return nil
 end
 
 local function startCameraUpdates()
     if cameraConnection then return end
+    local last = nil
     cameraConnection = RunService.RenderStepped:Connect(function()
-        if cameraTargetCFrame and isRunning then
-            if lastCameraTarget ~= cameraTargetCFrame then
+        if cameraTargetCFrame then
+            if last ~= cameraTargetCFrame then
                 camera.CFrame = cameraTargetCFrame
-                lastCameraTarget = cameraTargetCFrame
+                last = cameraTargetCFrame
             end
         end
     end)
@@ -134,118 +111,92 @@ local function stopCameraUpdates()
         cameraConnection = nil
     end
     cameraTargetCFrame = nil
-    lastCameraTarget = nil
 end
 
 local function initialize()
-    local stovePos = nil
-
-    local graffitiList = GRAFFITI_PATH:GetChildren()
-    local graffiti = graffitiList[3]
-    if graffiti then
-        local gChildren = graffiti:GetChildren()
-        local toRemove = gChildren[25]
-        if toRemove then
-            toRemove:Destroy()
-        end
+    local g = GRAFFITI_PATH:GetChildren()[3]
+    if g then
+        local toRemove = g:GetChildren()[25]
+        if toRemove then toRemove:Destroy() end
     end
 
-    local laundry = findLaundry()
-    if laundry then laundry:Destroy() end
+    local laundryPart = findBySize(LAUNDRY_PATH, Vector3.new(62.3, 0.15, 34.8), {X=0.5, Y=0.01, Z=0.5})
+    if laundryPart then
+        laundryPart:Destroy()
+    end
 
-    local floor = findFloor()
+    local floor = findBySize(FLOOR_PATH, Vector3.new(136.029, 0.849987, 217.418), {X=2, Y=0.1, Z=2})
     if floor then
-        local pos = floor.Position
-        floor.Position = Vector3.new(pos.X, SETTINGS.FLOOR_Y_TARGET, pos.Z)
+        local p = floor.Position
+        floor.Position = Vector3.new(p.X, SETTINGS.FLOOR_Y_TARGET, p.Z)
     end
 
-    local stoveChildren = STOVE_PATH:GetChildren()
-    local stoveModel = stoveChildren[1]
+    local stoveModel = STOVE_PATH:GetChildren()[1]
     if stoveModel and stoveModel:FindFirstChild("MainPart") then
         local prompt = stoveModel.MainPart:FindFirstChild("ProximityPrompt")
         if prompt then
-            stoveData.prompt = prompt
             prompt.HoldDuration = 0
             prompt.MaxActivationDistance = SETTINGS.STOVE_PROMPT_MAX_DIST
-
-            stovePos = prompt.Parent.Position
-            stoveData.teleportPos = stovePos
-            stoveData.teleportCFrame = CFrame.new(stovePos)
-            stoveData.cameraPos = stovePos + STOVE_CAM_OFFSET
-            stoveData.cameraCFrame = CFrame.new(stoveData.cameraPos, stovePos)
-            stoveData.cameraLookAt = stovePos
+            local pos = prompt.Parent.Position
+            stoveData = {
+                prompt = prompt,
+                teleportCFrame = CFrame.new(pos),
+                cameraCFrame = CFrame.new(pos + STOVE_CAM_OFFSET, pos),
+                cameraLookAt = pos
+            }
         end
     end
 
-    local wmChildren = LAUNDRY_PATH:GetChildren()
-    local count = 0
-    for i = 1, #wmChildren do
-        local child = wmChildren[i]
-        if child and child.Name == "WashingMachine" then
+    for _, child in ipairs(LAUNDRY_PATH:GetChildren()) do
+        if child.Name == "WashingMachine" then
             local part = child:FindFirstChild("Part")
-            if part then
-                local attachment = part:FindFirstChild("Attachment")
-                if attachment then
-                    local prompt = attachment:FindFirstChild("ProximityPrompt")
-                    if prompt then
-                        prompt.MaxActivationDistance = SETTINGS.PROMPT_MAX_DIST
-                        prompt.HoldDuration = 0
-
-                        local door = child:FindFirstChild("Door")
-                        local doorPos = door and door.CFrame and door.CFrame.Position
-                        local promptPos = prompt.Parent.WorldPosition
-
-                        if doorPos then
-                            count = count + 1
-                            local teleportPos = doorPos + SETTINGS.DOOR_OFFSET
-                            local cameraPos = promptPos + LAUNDRY_CAM_OFFSET
-                            washingMachines[count] = {
-                                prompt = prompt,
-                                teleportPos = teleportPos,
-                                teleportCFrame = CFrame.new(teleportPos),
-                                cameraPos = cameraPos,
-                                cameraCFrame = CFrame.new(cameraPos, promptPos),
-                                cameraLookAt = promptPos
-                            }
-                        end
-                    end
+            local door = child:FindFirstChild("Door")
+            if part and door then
+                local attach = part:FindFirstChild("Attachment")
+                local prompt = attach and attach:FindFirstChild("ProximityPrompt")
+                if prompt then
+                    prompt.MaxActivationDistance = SETTINGS.PROMPT_MAX_DIST
+                    prompt.HoldDuration = 0
+                    local doorPos = door.CFrame.Position
+                    local promptPos = prompt.Parent.WorldPosition
+                    local teleportPos = doorPos + SETTINGS.DOOR_OFFSET
+                    table.insert(washingMachines, {
+                        prompt = prompt,
+                        teleportCFrame = CFrame.new(teleportPos),
+                        cameraCFrame = CFrame.new(promptPos + LAUNDRY_CAM_OFFSET, promptPos),
+                    })
                 end
             end
         end
     end
 
-    if stovePos and #washingMachines > 0 then
-        local middlePos = Vector3.new(stovePos.X, stovePos.Y - SETTINGS.MIDDLE_PLATFORM_OFFSET, stovePos.Z)
+    if stoveData and #washingMachines > 0 then
+        local sPos = stoveData.teleportCFrame.Position
+        local middlePos = Vector3.new(sPos.X, sPos.Y - SETTINGS.MIDDLE_PLATFORM_OFFSET, sPos.Z)
         MIDDLE_TELEPORT_POS = middlePos
         MIDDLE_CAMERA_POS = middlePos + LAUNDRY_CAM_OFFSET
         MIDDLE_CAMERA_LOOKAT = middlePos
 
-        local platform = Instance.new("Part")
-        platform.Anchored = true
-        platform.Size = Vector3.new(50, 6, 50)
-        platform.Transparency = 1
-        platform.CanCollide = true
-        platform.CFrame = CFrame.new(middlePos.X, middlePos.Y - 3, middlePos.Z)
-        platform.Parent = workspace
-        middlePlatform = platform
-
-        task_wait(0.05)
+        middlePlatform = Instance.new("Part")
+        middlePlatform.Anchored = true
+        middlePlatform.Size = Vector3.new(50, 6, 50)
+        middlePlatform.Transparency = 1
+        middlePlatform.CanCollide = true
+        middlePlatform.CFrame = CFrame.new(middlePos.X, middlePos.Y - 3, middlePos.Z)
+        middlePlatform.Parent = workspace
     end
 end
 
 local function continuousSpam(prompt, totalTime)
-    if totalTime <= 0 or SETTINGS.ACTIVATION_DELAY <= 0 then return end
-
+    if totalTime <= 0 then return end
     local iterations = math.ceil(totalTime / SETTINGS.ACTIVATION_DELAY)
-    local inputHoldBegin = prompt and prompt.InputHoldBegin
-    local inputHoldEnd = prompt and prompt.InputHoldEnd
-
-    for _ = 1, iterations do
+    local begin = prompt.InputHoldBegin
+    local finish = prompt.InputHoldEnd
+    for i = 1, iterations do
         if not isRunning then break end
-
-        if prompt and prompt.Parent and prompt.Enabled and inputHoldBegin and inputHoldEnd then
-            inputHoldBegin(prompt)
-            inputHoldEnd(prompt)
+        if begin and finish then
+            begin(prompt)
+            finish(prompt)
         else
             break
         end
@@ -254,50 +205,33 @@ local function continuousSpam(prompt, totalTime)
 end
 
 local function teleportToMachine(machine, useMiddle)
-    if not machine or not machine.teleportCFrame then return end
-
-    if not (humanoidRootPart and humanoidRootPart.Parent) then
-        character = player.Character
-        if character then
-            humanoidRootPart = character:WaitForChild("HumanoidRootPart", 2)
-        end
-        if not humanoidRootPart then return end
-    end
-
     if useMiddle and MIDDLE_TELEPORT_POS then
         humanoidRootPart.CFrame = CFrame.new(MIDDLE_TELEPORT_POS)
         cameraTargetCFrame = CFrame.new(MIDDLE_CAMERA_POS, MIDDLE_CAMERA_LOOKAT)
         task_wait(SETTINGS.MIDDLE_STOP_WAIT)
     end
-
     humanoidRootPart.CFrame = machine.teleportCFrame
     cameraTargetCFrame = machine.cameraCFrame
-
     task_wait(0.03)
 end
 
 local function processStove(useMiddle)
-    if not stoveData.prompt or not stoveData.teleportCFrame or not stoveData.cameraCFrame then return end
-    if not (humanoidRootPart and humanoidRootPart.Parent) then return end
-
+    if not stoveData then return end
     if useMiddle and MIDDLE_TELEPORT_POS then
         humanoidRootPart.CFrame = CFrame.new(MIDDLE_TELEPORT_POS)
         cameraTargetCFrame = CFrame.new(MIDDLE_CAMERA_POS, MIDDLE_CAMERA_LOOKAT)
         task_wait(SETTINGS.MIDDLE_STOP_WAIT)
     end
-
     humanoidRootPart.CFrame = stoveData.teleportCFrame
     task_wait(SETTINGS.STOVE_PRE_CAMERA_WAIT)
     cameraTargetCFrame = stoveData.cameraCFrame
     task_wait(SETTINGS.STOVE_PRE_SPAM_WAIT)
-
     continuousSpam(stoveData.prompt, SETTINGS.STOVE_TOTAL_TIME)
 end
 
 local function mainLoop()
     local machineCount = #washingMachines
     if machineCount == 0 then return end
-
     camera.CameraType = Enum.CameraType.Scriptable
     startCameraUpdates()
     local lastWasStove = true
@@ -306,21 +240,16 @@ local function mainLoop()
     while isRunning do
         for _ = 1, 2 do
             if not isRunning then break end
-
             local machine = washingMachines[idx]
             if machine then
                 teleportToMachine(machine, lastWasStove)
                 lastWasStove = false
-                if not isRunning then break end
-                continuousSpam(machine.prompt, SETTINGS.LAUDRY_TOTAL_TIME)
+                continuousSpam(machine.prompt, SETTINGS.LAUNDRY_TOTAL_TIME)
             end
-
             idx = idx + 1
             if idx > machineCount then idx = 1 end
         end
-
         currentLaundryIndex = idx
-
         if isRunning then
             processStove(true)
             lastWasStove = true
@@ -332,35 +261,26 @@ local function mainLoop()
     camera.CameraType = originalCameraType
 end
 
-player.CharacterRemoving:Connect(function()
+local function stopAll()
     isRunning = false
     stopCameraUpdates()
-    if camera then
-        camera.CameraType = originalCameraType
-    end
+    camera.CameraType = originalCameraType
     if middlePlatform and middlePlatform.Parent then
         middlePlatform:Destroy()
         middlePlatform = nil
     end
-end)
+end
 
 initialize()
-
 local button = createGUI()
 button.MouseButton1Click:Connect(function()
     isRunning = not isRunning
     button.Text = isRunning and "Stop" or "Start"
     button.BackgroundColor3 = isRunning and Color3.fromRGB(255, 0, 0) or Color3.fromRGB(0, 255, 0)
-
     if isRunning then
         currentLaundryIndex = 1
         task.spawn(mainLoop)
     else
-        stopCameraUpdates()
-        camera.CameraType = originalCameraType
-        if middlePlatform and middlePlatform.Parent then
-            middlePlatform:Destroy()
-            middlePlatform = nil
-        end
+        stopAll()
     end
 end)
