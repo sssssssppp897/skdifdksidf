@@ -1,4 +1,3 @@
--- Optimized & trimmed version (assumes static world & player never resets)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
@@ -284,3 +283,4 @@ button.MouseButton1Click:Connect(function()
         stopAll()
     end
 end)
+
