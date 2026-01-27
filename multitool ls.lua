@@ -461,7 +461,7 @@ VanButton.MouseButton1Click:Connect(function()
     VanButton.BackgroundColor3 = Color3.fromRGB(255, 165, 0)
     VanStatus.Text = "Working..."
     task.spawn(function()
-        local targetPos = Vector3.new(1487.08288, -0.4757, 2278.93408)
+        local playerPos = humanoidRootPart and humanoidRootPart.Position or (LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") and LocalPlayer.Character.HumanoidRootPart.Position) or (workspace.CurrentCamera and workspace.CurrentCamera.CFrame.p) or Vector3.new(0,0,0)
         local vehicle = workspace.Vehicles:FindFirstChild(LocalPlayer.Name)
         if vehicle then
             local base = vehicle:FindFirstChild("Base")
@@ -488,7 +488,7 @@ VanButton.MouseButton1Click:Connect(function()
                 if obj.Name == "VehicleSpawnButton" then
                     local pos = obj:IsA("BasePart") and obj.Position or (obj:IsA("Model") and obj:GetPivot().Position)
                     if pos then
-                        local dist = (pos - targetPos).Magnitude
+                        local dist = (pos - playerPos).Magnitude
                         if dist < closestDist then
                             closestDist = dist
                             closestButton = obj
