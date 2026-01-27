@@ -480,7 +480,7 @@ VanButton.MouseButton1Click:Connect(function()
                 end
             end
         end
-        task.wait(0.5)
+        task.wait()
         local closestButton, closestDist = nil, math.huge
         local ignoreFolder = workspace:FindFirstChild("Ignore")
         if ignoreFolder then
