@@ -1,5 +1,3 @@
--- (keep the script header and UI creation unchanged; pasted here the full script with minimal fixes)
-
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
@@ -337,7 +335,6 @@ local function deliverBatch()
 end
 
 local function lootLoop()
-    -- FIX: protect the loop from runtime errors so camera/isLooting can't get stuck
     local ok, err = pcall(function()
         while isLooting do
             local spawnsFolder = workspace:FindFirstChild("SpawnsLoot")
@@ -369,7 +366,7 @@ local function lootLoop()
                     deliverBatch()
                     return
                 else
-                    task.wait(0.15) -- FIX: small throttle to avoid busy tight loop
+                    task.wait(0.15)
                     continue
                 end
             end
@@ -394,8 +391,7 @@ local function lootLoop()
                 humanoidRootPart.CFrame = CFrame.new(part.Position)
                 camera.CameraType = Enum.CameraType.Scriptable
                 camera.CFrame = CFrame.new(part.Position + Vector3.new(0, 4, 0), part.Position)
-                
-                -- FIX: pcall around prompt input so errors don't halt the thread and leave camera stuck
+
                 local succ, perr = pcall(function()
                     local startTime = tick()
                     while tick() - startTime < 0.17 and isLooting do
@@ -420,7 +416,6 @@ local function lootLoop()
             end
         end
     end)
-    -- FIX: always attempt to restore camera and UI state after loop exits or errors
     camera.CameraType = Enum.CameraType.Custom
     if not ok then
         warn("lootLoop errored:", err)
