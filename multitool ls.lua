@@ -77,7 +77,7 @@ local ServerHeader = Instance.new("TextLabel")
 ServerHeader.Size = UDim2.new(1, -10, 0, 25)
 ServerHeader.Position = UDim2.new(0, 5, 0, 5)
 ServerHeader.BackgroundTransparency = 1
-ServerHeader.Text = "🌐 Region Hopper"
+ServerHeader.Text = "🌐 Region Hopper (Buggy)"
 ServerHeader.TextColor3 = Color3.fromRGB(255, 255, 255)
 ServerHeader.Font = Enum.Font.GothamBold
 ServerHeader.TextSize = 16
@@ -109,16 +109,8 @@ local ServerListLayout = Instance.new("UIListLayout")
 ServerListLayout.Padding = UDim.new(0, 5)
 ServerListLayout.Parent = ServerScroll
 
-local IntroLoad = nil
-local EventsFolder = ReplicatedStorage:FindFirstChild("Events") or ReplicatedStorage:WaitForChild("Events", 3)
-if EventsFolder then
-    IntroLoad = EventsFolder:FindFirstChild("IntroLoad") or EventsFolder:WaitForChild("IntroLoad", 3)
-end
-if not IntroLoad then
-    IntroLoad = ReplicatedStorage:FindFirstChild("IntroLoad") or ReplicatedStorage:WaitForChild("IntroLoad", 2)
-end
-
-local ServersList = ReplicatedStorage:FindFirstChild("Servers_List") or ReplicatedStorage:WaitForChild("Servers_List", 3)
+local IntroLoad = ReplicatedStorage:WaitForChild("Events"):WaitForChild("IntroLoad")
+local ServersList = ReplicatedStorage:WaitForChild("Servers_List")
 
 local function GetJobId(serverObj)
     local jobId = serverObj:FindFirstChild("JobId")
@@ -131,16 +123,23 @@ local function GetJobId(serverObj)
     return serverObj.Name
 end
 
-local function IsValidServer(serverObj)
-    if serverObj.Name:lower():find("template") or serverObj.Name:lower():find("newserver") then return false end
-    local region = serverObj:FindFirstChild("Region")
-    if not region then return false end
-    local jobId = GetJobId(serverObj)
-    if jobId == CurrentJobId then return false end
-    return true, jobId
+local function IsNormalServer(serverObj)
+    local serverType = serverObj:FindFirstChild("ServerType")
+    if not serverType then return false end
+    return serverType.Value == "Default"
 end
 
 local function CreateRegionButton(regionName, servers, parent)
+    table.sort(servers, function(a, b)
+        local countA = a.Object:FindFirstChild("PlayerCount")
+        local countB = b.Object:FindFirstChild("PlayerCount")
+        local valA = countA and countA.Value or math.huge
+        local valB = countB and countB.Value or math.huge
+        return valA < valB
+    end)
+    
+    local currentIndex = 1
+    
     local btn = Instance.new("TextButton")
     btn.Size = UDim2.new(1, -5, 0, 36)
     btn.BackgroundColor3 = Color3.fromRGB(60, 60, 75)
@@ -171,12 +170,12 @@ local function CreateRegionButton(regionName, servers, parent)
         busy = true
         btn.Active = false
 
-        local pick = servers[math.random(1, #servers)]
-        if not pick or not pick.JobId then
+        local pick = servers[currentIndex]
+        if not pick or not pick.Object then
             ServerStatus.Text = "Error: invalid server"
             ServerStatus.TextColor3 = Color3.fromRGB(255, 0, 0)
             task.delay(2, function()
-                ServerStatus.Text = ""
+                ServerStatus.Text = "Ready"
             end)
             busy = false
             btn.Active = true
@@ -187,16 +186,13 @@ local function CreateRegionButton(regionName, servers, parent)
             LocalPlayer.TryingToJoinDelay:Destroy()
         end
 
-        ServerStatus.Text = "Joining " .. tostring(string.sub(tostring(pick.JobId), 1, 8)) .. "..."
+        local jobId = GetJobId(pick.Object)
+        ServerStatus.Text = "Joining " .. tostring(string.sub(tostring(jobId), 1, 8)) .. "..."
         ServerStatus.TextColor3 = Color3.fromRGB(255, 200, 50)
 
         task.spawn(function()
             local ok, err = pcall(function()
-                if IntroLoad and pick.Object and pick.Object.Parent then
-                    IntroLoad:FireServer("RequestJoinServer", pick.Object)
-                else
-                    TeleportService:TeleportToPlaceInstance(PlaceId, pick.JobId, LocalPlayer)
-                end
+                IntroLoad:FireServer("RequestJoinServer", pick.Object)
             end)
 
             if not ok then
@@ -208,6 +204,8 @@ local function CreateRegionButton(regionName, servers, parent)
             busy = false
             btn.Active = true
         end)
+        
+        currentIndex = currentIndex % #servers + 1
     end)
 end
 
@@ -223,27 +221,33 @@ local function LoadServerRegions()
     
     local regions = {}
     for _, server in ipairs(ServersList:GetChildren()) do
-        if server:IsA("Folder") or server:IsA("Configuration") then
-            local isValid, jobId = IsValidServer(server)
-            if isValid then
-                local regionName = server:FindFirstChild("Region").Value
-                if not regions[regionName] then regions[regionName] = {} end
-                table.insert(regions[regionName], {Object = server, JobId = jobId})
-            end
-        end
+        if not (server:IsA("Folder") or server:IsA("Configuration")) then continue end
+        
+        local jobId = GetJobId(server)
+        if jobId == CurrentJobId then continue end
+        if not IsNormalServer(server) then continue end
+        
+        local regionObj = server:FindFirstChild("Region")
+        if not regionObj then continue end
+        
+        local regionName = regionObj.Value
+        if not regions[regionName] then regions[regionName] = {} end
+        table.insert(regions[regionName], {Object = server, JobId = jobId})
     end
     
     if next(regions) == nil then
-        ServerStatus.Text = "⚠️ Click 'Servers' in main menu first"
+        ServerStatus.Text = "⚠️ No normal servers found"
         return
     end
     
+    local regionCount = 0
     for regionName, servers in pairs(regions) do
         CreateRegionButton(regionName, servers, ServerScroll)
+        regionCount = regionCount + 1
     end
     
     ServerScroll.CanvasSize = UDim2.new(0, 0, 0, ServerListLayout.AbsoluteContentSize.Y + 10)
-    ServerStatus.Text = "✅ Loaded 6 regions"
+    ServerStatus.Text = "✅ Loaded " .. tostring(regionCount) .. " regions"
     ServerStatus.TextColor3 = Color3.fromRGB(150, 255, 150)
 end
 
@@ -288,7 +292,7 @@ local LootCounter = Instance.new("TextLabel")
 LootCounter.Size = UDim2.new(1, -20, 0, 24)
 LootCounter.Position = UDim2.new(0, 10, 0, 80)
 LootCounter.BackgroundTransparency = 1
-LootCounter.Text = "Collected: 0"
+LootCounter.Text = "Collected: 0/40"
 LootCounter.TextColor3 = Color3.fromRGB(200, 200, 200)
 LootCounter.Font = Enum.Font.Gotham
 LootCounter.TextSize = 14
@@ -311,7 +315,7 @@ LocalPlayer.CharacterAdded:Connect(function(char)
         hasCompleted = false
         collectedCount = 0
         isLooting = false
-        LootCounter.Text = "Collected: 0"
+        LootCounter.Text = "Collected: 0/40"
         LootToggle.Text = "START LOOTING"
         LootToggle.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
         camera.CameraType = Enum.CameraType.Custom
@@ -373,6 +377,11 @@ local function lootLoop()
         for _, lootInfo in ipairs(availableLoot) do
             if not isLooting then break end
             
+            if collectedCount >= 40 then
+                deliverBatch()
+                return
+            end
+            
             local part = lootInfo.Part
             local prompt = lootInfo.Prompt
             
@@ -383,7 +392,7 @@ local function lootLoop()
             camera.CFrame = CFrame.new(part.Position + Vector3.new(0, 4, 0), part.Position)
             
             local startTime = tick()
-            while tick() - startTime < 0.13 do
+            while tick() - startTime < 0.16 do
                 prompt:InputHoldBegin()
                 prompt:InputHoldEnd()
                 task.wait()
@@ -392,7 +401,12 @@ local function lootLoop()
             if not isLooting then break end
             
             collectedCount = collectedCount + 1
-            LootCounter.Text = "Collected: " .. collectedCount
+            LootCounter.Text = "Collected: " .. collectedCount .. "/40"
+            
+            if collectedCount >= 40 then
+                deliverBatch()
+                return
+            end
         end
         
         task.wait()
@@ -406,7 +420,7 @@ LootToggle.MouseButton1Click:Connect(function()
         hasCompleted = false
         collectedCount = 0
         isLooting = false
-        LootCounter.Text = "Collected: 0"
+        LootCounter.Text = "Collected: 0/40"
         LootToggle.Text = "START LOOTING"
         LootToggle.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
         return
