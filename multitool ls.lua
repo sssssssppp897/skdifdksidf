@@ -1,3 +1,5 @@
+-- (keep the script header and UI creation unchanged; pasted here the full script with minimal fixes)
+
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
@@ -292,7 +294,7 @@ local LootCounter = Instance.new("TextLabel")
 LootCounter.Size = UDim2.new(1, -20, 0, 24)
 LootCounter.Position = UDim2.new(0, 10, 0, 80)
 LootCounter.BackgroundTransparency = 1
-LootCounter.Text = "Collected: 0/40"
+LootCounter.Text = "Collected: 0/38"
 LootCounter.TextColor3 = Color3.fromRGB(200, 200, 200)
 LootCounter.Font = Enum.Font.Gotham
 LootCounter.TextSize = 14
@@ -315,7 +317,7 @@ LocalPlayer.CharacterAdded:Connect(function(char)
         hasCompleted = false
         collectedCount = 0
         isLooting = false
-        LootCounter.Text = "Collected: 0/40"
+        LootCounter.Text = "Collected: 0/38"
         LootToggle.Text = "START LOOTING"
         LootToggle.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
         camera.CameraType = Enum.CameraType.Custom
@@ -335,83 +337,99 @@ local function deliverBatch()
 end
 
 local function lootLoop()
-    while isLooting do
-        local spawnsFolder = workspace:FindFirstChild("SpawnsLoot")
-        if not spawnsFolder then task.wait() continue end
-        
-        local availableLoot = {}
-        for _, spawnFolder in ipairs(spawnsFolder:GetChildren()) do
-            if not isLooting then break end
+    -- FIX: protect the loop from runtime errors so camera/isLooting can't get stuck
+    local ok, err = pcall(function()
+        while isLooting do
+            local spawnsFolder = workspace:FindFirstChild("SpawnsLoot")
+            if not spawnsFolder then task.wait() continue end
             
-            local part = spawnFolder:FindFirstChild("Part")
-            if not part then continue end
+            local availableLoot = {}
+            for _, spawnFolder in ipairs(spawnsFolder:GetChildren()) do
+                if not isLooting then break end
+                
+                local part = spawnFolder:FindFirstChild("Part")
+                if not part then continue end
+                
+                local attachment = part:FindFirstChild("Attachment")
+                if not attachment then continue end
+                
+                local prompt = attachment:FindFirstChild("ProximityPrompt")
+                if not prompt or not prompt.Enabled then continue end
+                
+                local distance = (humanoidRootPart.Position - part.Position).Magnitude
+                table.insert(availableLoot, {
+                    Part = part,
+                    Prompt = prompt,
+                    Distance = distance
+                })
+            end
             
-            local attachment = part:FindFirstChild("Attachment")
-            if not attachment then continue end
+            if #availableLoot == 0 then
+                if collectedCount > 0 then
+                    deliverBatch()
+                    return
+                else
+                    task.wait(0.15) -- FIX: small throttle to avoid busy tight loop
+                    continue
+                end
+            end
             
-            local prompt = attachment:FindFirstChild("ProximityPrompt")
-            if not prompt or not prompt.Enabled then continue end
+            table.sort(availableLoot, function(a, b)
+                return a.Distance < b.Distance
+            end)
             
-            local distance = (humanoidRootPart.Position - part.Position).Magnitude
-            table.insert(availableLoot, {
-                Part = part,
-                Prompt = prompt,
-                Distance = distance
-            })
-        end
-        
-        if #availableLoot == 0 then
-            if collectedCount > 0 then
-                deliverBatch()
-                return
-            else
-                task.wait()
-                continue
+            for _, lootInfo in ipairs(availableLoot) do
+                if not isLooting then break end
+                
+                if collectedCount >= 38 then
+                    deliverBatch()
+                    return
+                end
+                
+                local part = lootInfo.Part
+                local prompt = lootInfo.Prompt
+                
+                if not prompt.Enabled then continue end
+                
+                humanoidRootPart.CFrame = CFrame.new(part.Position)
+                camera.CameraType = Enum.CameraType.Scriptable
+                camera.CFrame = CFrame.new(part.Position + Vector3.new(0, 4, 0), part.Position)
+                
+                -- FIX: pcall around prompt input so errors don't halt the thread and leave camera stuck
+                local succ, perr = pcall(function()
+                    local startTime = tick()
+                    while tick() - startTime < 0.17 and isLooting do
+                        prompt:InputHoldBegin()
+                        prompt:InputHoldEnd()
+                        task.wait()
+                    end
+                end)
+                if not succ then
+                    warn("Proximity prompt input failed:", perr)
+                end
+                
+                if not isLooting then break end
+                
+                collectedCount = collectedCount + 1
+                LootCounter.Text = "Collected: " .. collectedCount .. "/38"
+                
+                if collectedCount >= 38 then
+                    deliverBatch()
+                    return
+                end
             end
         end
-        
-        table.sort(availableLoot, function(a, b)
-            return a.Distance < b.Distance
-        end)
-        
-        for _, lootInfo in ipairs(availableLoot) do
-            if not isLooting then break end
-            
-            if collectedCount >= 40 then
-                deliverBatch()
-                return
-            end
-            
-            local part = lootInfo.Part
-            local prompt = lootInfo.Prompt
-            
-            if not prompt.Enabled then continue end
-            
-            humanoidRootPart.CFrame = CFrame.new(part.Position)
-            camera.CameraType = Enum.CameraType.Scriptable
-            camera.CFrame = CFrame.new(part.Position + Vector3.new(0, 4, 0), part.Position)
-            
-            local startTime = tick()
-            while tick() - startTime < 0.16 do
-                prompt:InputHoldBegin()
-                prompt:InputHoldEnd()
-                task.wait()
-            end
-            
-            if not isLooting then break end
-            
-            collectedCount = collectedCount + 1
-            LootCounter.Text = "Collected: " .. collectedCount .. "/40"
-            
-            if collectedCount >= 40 then
-                deliverBatch()
-                return
-            end
-        end
-        
-        task.wait()
-    end
+    end)
+    -- FIX: always attempt to restore camera and UI state after loop exits or errors
     camera.CameraType = Enum.CameraType.Custom
+    if not ok then
+        warn("lootLoop errored:", err)
+        isLooting = false
+        if not hasCompleted then
+            LootToggle.Text = "START LOOTING"
+            LootToggle.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+        end
+    end
 end
 
 LootToggle.MouseButton1Click:Connect(function()
@@ -420,13 +438,14 @@ LootToggle.MouseButton1Click:Connect(function()
         hasCompleted = false
         collectedCount = 0
         isLooting = false
-        LootCounter.Text = "Collected: 0/40"
+        LootCounter.Text = "Collected: 0/38"
         LootToggle.Text = "START LOOTING"
         LootToggle.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
         return
     end
     if text == "START LOOTING" then
         if hasCompleted then return end
+        if isLooting then return end -- FIX: guard against double-start/race
         isLooting = true
         LootToggle.Text = "STOP"
         LootToggle.BackgroundColor3 = Color3.fromRGB(170, 0, 0)
