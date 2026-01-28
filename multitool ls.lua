@@ -1,6 +1,5 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local StarterGui = game:GetService("StarterGui")
 local TweenService = game:GetService("TweenService")
 local TeleportService = game:GetService("TeleportService")
 
@@ -289,7 +288,7 @@ local LootCounter = Instance.new("TextLabel")
 LootCounter.Size = UDim2.new(1, -20, 0, 24)
 LootCounter.Position = UDim2.new(0, 10, 0, 80)
 LootCounter.BackgroundTransparency = 1
-LootCounter.Text = "Collected: 0/30"
+LootCounter.Text = "Collected: 0"
 LootCounter.TextColor3 = Color3.fromRGB(200, 200, 200)
 LootCounter.Font = Enum.Font.Gotham
 LootCounter.TextSize = 14
@@ -297,46 +296,27 @@ LootCounter.TextXAlignment = Enum.TextXAlignment.Left
 LootCounter.TextYAlignment = Enum.TextYAlignment.Center
 LootCounter.Parent = LootSection
 
-local player = LocalPlayer
 local isLooting = false
 local collectedCount = 0
 local hasCompleted = false
-local LearnCraftDealerEvent = ReplicatedStorage:WaitForChild("Events"):WaitForChild("LearnCraftDealerEvent")
-local LockerEvent = ReplicatedStorage:WaitForChild("Events"):WaitForChild("LockerEvent")
 
-local character = player.Character or player.CharacterAdded:Wait()
+local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
 local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
-local humanoid = character:WaitForChild("Humanoid")
 
-player.CharacterAdded:Connect(function(char)
+LocalPlayer.CharacterAdded:Connect(function(char)
     character = char
     humanoidRootPart = char:WaitForChild("HumanoidRootPart")
-    humanoid = char:WaitForChild("Humanoid")
+    
+    if hasCompleted then
+        hasCompleted = false
+        collectedCount = 0
+        isLooting = false
+        LootCounter.Text = "Collected: 0"
+        LootToggle.Text = "START LOOTING"
+        LootToggle.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+        camera.CameraType = Enum.CameraType.Custom
+    end
 end)
-
-local function storeWeapon()
-    local weapon = player.Backpack:FindFirstChild("Trench Sweeper")
-    if not weapon then return end
-    humanoid:EquipTool(weapon)
-    task.wait(0.1)
-    weapon = character:FindFirstChild("Trench Sweeper")
-    local nearestLocker, nearestDist = nil, math.huge
-    for _, obj in pairs(workspace:GetDescendants()) do
-        if obj.Name == "Locker" and obj:IsA("Model") then
-            local lockerHrp = obj:FindFirstChild("HumanoidRootPart")
-            if lockerHrp then
-                local dist = (humanoidRootPart.Position - lockerHrp.Position).Magnitude
-                if dist < nearestDist then
-                    nearestDist = dist
-                    nearestLocker = obj
-                end
-            end
-        end
-    end
-    if nearestLocker then
-        LockerEvent:FireServer("LockerStore", weapon, nearestLocker)
-    end
-end
 
 local function deliverBatch()
     humanoidRootPart.CFrame = CFrame.new(1092, 8, -95)
@@ -345,7 +325,6 @@ local function deliverBatch()
     isLooting = false
     hasCompleted = true
     collectedCount = 0
-    LootCounter.Text = "Complete! Reset to use again"
     LootToggle.Text = "Reset to use again!"
     LootToggle.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
     camera.CameraType = Enum.CameraType.Custom
@@ -355,31 +334,67 @@ local function lootLoop()
     while isLooting do
         local spawnsFolder = workspace:FindFirstChild("SpawnsLoot")
         if not spawnsFolder then task.wait() continue end
+        
+        local availableLoot = {}
         for _, spawnFolder in ipairs(spawnsFolder:GetChildren()) do
             if not isLooting then break end
+            
             local part = spawnFolder:FindFirstChild("Part")
             if not part then continue end
+            
             local attachment = part:FindFirstChild("Attachment")
             if not attachment then continue end
+            
             local prompt = attachment:FindFirstChild("ProximityPrompt")
-            if not prompt then continue end
+            if not prompt or not prompt.Enabled then continue end
+            
+            local distance = (humanoidRootPart.Position - part.Position).Magnitude
+            table.insert(availableLoot, {
+                Part = part,
+                Prompt = prompt,
+                Distance = distance
+            })
+        end
+        
+        if #availableLoot == 0 then
+            if collectedCount > 0 then
+                deliverBatch()
+                return
+            else
+                task.wait()
+                continue
+            end
+        end
+        
+        table.sort(availableLoot, function(a, b)
+            return a.Distance < b.Distance
+        end)
+        
+        for _, lootInfo in ipairs(availableLoot) do
+            if not isLooting then break end
+            
+            local part = lootInfo.Part
+            local prompt = lootInfo.Prompt
+            
             if not prompt.Enabled then continue end
+            
             humanoidRootPart.CFrame = CFrame.new(part.Position)
             camera.CameraType = Enum.CameraType.Scriptable
             camera.CFrame = CFrame.new(part.Position + Vector3.new(0, 4, 0), part.Position)
-            while isLooting and prompt.Enabled do
+            
+            local startTime = tick()
+            while tick() - startTime < 0.13 do
                 prompt:InputHoldBegin()
                 prompt:InputHoldEnd()
                 task.wait()
             end
+            
             if not isLooting then break end
+            
             collectedCount = collectedCount + 1
-            LootCounter.Text = "Collected: " .. collectedCount .. "/30"
-            if collectedCount >= 30 then
-                deliverBatch()
-                return
-            end
+            LootCounter.Text = "Collected: " .. collectedCount
         end
+        
         task.wait()
     end
     camera.CameraType = Enum.CameraType.Custom
@@ -391,7 +406,7 @@ LootToggle.MouseButton1Click:Connect(function()
         hasCompleted = false
         collectedCount = 0
         isLooting = false
-        LootCounter.Text = "Collected: 0/30"
+        LootCounter.Text = "Collected: 0"
         LootToggle.Text = "START LOOTING"
         LootToggle.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
         return
