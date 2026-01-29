@@ -66,6 +66,23 @@ local ListLayout = Instance.new("UIListLayout")
 ListLayout.Padding = UDim.new(0, 15)
 ListLayout.Parent = Scroll
 
+local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+
+LocalPlayer.CharacterAdded:Connect(function(char)
+    character = char
+    humanoidRootPart = char:WaitForChild("HumanoidRootPart")
+end)
+
+local function teleportToCoords(x, y, z)
+    if not humanoidRootPart then
+        humanoidRootPart = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    end
+    if humanoidRootPart then
+        humanoidRootPart.CFrame = CFrame.new(x, y, z)
+    end
+end
+
 local ServerSection = Instance.new("Frame")
 ServerSection.Size = UDim2.new(1, 0, 0, 200)
 ServerSection.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
@@ -256,6 +273,268 @@ task.spawn(function()
     pcall(LoadServerRegions)
 end)
 
+local BankSection = Instance.new("Frame")
+BankSection.Size = UDim2.new(1, 0, 0, 120)
+BankSection.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+BankSection.BorderSizePixel = 0
+BankSection.Parent = Scroll
+Instance.new("UICorner", BankSection).CornerRadius = UDim.new(0, 8)
+
+local BankHeader = Instance.new("TextLabel")
+BankHeader.Size = UDim2.new(1, -10, 0, 25)
+BankHeader.Position = UDim2.new(0, 5, 0, 5)
+BankHeader.BackgroundTransparency = 1
+BankHeader.Text = "🏦 Auto Bank"
+BankHeader.TextColor3 = Color3.new(1, 1, 1)
+BankHeader.Font = Enum.Font.GothamBold
+BankHeader.TextSize = 16
+BankHeader.TextXAlignment = Enum.TextXAlignment.Left
+BankHeader.TextYAlignment = Enum.TextYAlignment.Center
+BankHeader.Parent = BankSection
+
+local BankStatus = Instance.new("TextLabel")
+BankStatus.Size = UDim2.new(1, -20, 0, 20)
+BankStatus.Position = UDim2.new(0, 10, 0, 70)
+BankStatus.BackgroundTransparency = 1
+BankStatus.Text = "Ready"
+BankStatus.TextColor3 = Color3.fromRGB(200, 200, 200)
+BankStatus.Font = Enum.Font.Gotham
+BankStatus.TextSize = 12
+BankStatus.TextXAlignment = Enum.TextXAlignment.Left
+BankStatus.TextYAlignment = Enum.TextYAlignment.Center
+BankStatus.Parent = BankSection
+
+local BankToggle = Instance.new("TextButton")
+BankToggle.Size = UDim2.new(1, -20, 0, 36)
+BankToggle.Position = UDim2.new(0, 10, 0, 32)
+BankToggle.BackgroundColor3 = Color3.fromRGB(46, 204, 113)
+BankToggle.Text = "ROB BANK"
+BankToggle.TextColor3 = Color3.new(1, 1, 1)
+BankToggle.Font = Enum.Font.GothamBold
+BankToggle.TextSize = 16
+BankToggle.TextXAlignment = Enum.TextXAlignment.Center
+BankToggle.TextYAlignment = Enum.TextYAlignment.Center
+BankToggle.Parent = BankSection
+Instance.new("UICorner", BankToggle).CornerRadius = UDim.new(0, 8)
+
+local isBankRunning = false
+local BANK_CONFIG = {
+    SPAM_DELAY = 0.02,
+    SCAN_DELAY = 0.05,
+}
+
+local function teleportToPart(part)
+    if not humanoidRootPart or not part or not part:IsA("BasePart") then return false end
+    humanoidRootPart.CFrame = CFrame.new(part.Position)
+    camera.CameraType = Enum.CameraType.Scriptable
+    camera.CFrame = CFrame.new(part.Position + Vector3.new(0, 4, 0), part.Position)
+    task.wait()
+    return true
+end
+
+local function firePrompt(prompt)
+    if not prompt or not prompt:IsA("ProximityPrompt") then return end
+    prompt:InputHoldBegin()
+    prompt:InputHoldEnd()
+end
+
+local function collectForFixedTime(prompt, duration)
+    local start = tick()
+    while tick() - start < duration and isBankRunning and prompt and prompt.Parent do
+        firePrompt(prompt)
+        task.wait(BANK_CONFIG.SPAM_DELAY)
+    end
+end
+
+local function getButtonPrompt()
+    local bank = workspace:FindFirstChild("BANK")
+    if not bank then return nil end
+    local panel = bank:FindFirstChild("ButtonPanel")
+    if not panel then return nil end
+    local promptPart = panel:FindFirstChild("PromptPart")
+    if not promptPart then return nil end
+    return promptPart:FindFirstChild("ProximityPrompt"), promptPart
+end
+
+local function findEnabledMoneyBox()
+    local bank = workspace:FindFirstChild("BANK")
+    if not bank then return nil, nil end
+    local boxes = bank:FindFirstChild("MoneyBoxes")
+    if not boxes then return nil, nil end
+    for _, box in ipairs(boxes:GetChildren()) do
+        local promptPart = box:FindFirstChild("PromptPart")
+        if promptPart then
+            local prompt = promptPart:FindFirstChild("ProximityPrompt")
+            if prompt and prompt.Enabled then
+                return prompt, promptPart
+            end
+        end
+    end
+    return nil, nil
+end
+
+local function updateBankButton()
+    if isBankRunning then
+        BankToggle.BackgroundColor3 = Color3.fromRGB(231, 76, 60)
+        BankToggle.Text = "STOP"
+    else
+        BankToggle.BackgroundColor3 = Color3.fromRGB(46, 204, 113)
+        BankToggle.Text = "ROB BANK"
+        camera.CameraType = Enum.CameraType.Custom
+        BankStatus.Text = "Ready"
+    end
+end
+
+local function autoRobBank()
+    teleportToCoords(980, 2, 541)
+    task.wait(0.5)
+    teleportToCoords(917, 3, 2589)
+    task.wait(1)
+
+    while isBankRunning do
+        if not (character and character.Parent) then break end
+        
+        local btnPrompt, btnPart = getButtonPrompt()
+        if btnPrompt and btnPrompt.Enabled then
+            BankStatus.Text = "Pressing button..."
+            if teleportToPart(btnPart) then
+                collectForFixedTime(btnPrompt, 0.3)
+            end
+            task.wait()
+            continue
+        end
+
+        local moneyPrompt, moneyPart = findEnabledMoneyBox()
+        if moneyPrompt and moneyPart then
+            BankStatus.Text = "Collecting money..."
+            moneyPrompt.HoldDuration = 0
+            if teleportToPart(moneyPart) then
+                collectForFixedTime(moneyPrompt, 0.3)
+            end
+            task.wait()
+            continue
+        end
+
+        BankStatus.Text = "Scanning..."
+        camera.CameraType = Enum.CameraType.Custom
+        task.wait(BANK_CONFIG.SCAN_DELAY)
+    end
+
+    updateBankButton()
+end
+
+BankToggle.MouseButton1Click:Connect(function()
+    isBankRunning = not isBankRunning
+    
+    if isBankRunning then
+        updateBankButton()
+        if LocalPlayer.Character then
+            humanoidRootPart = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        end
+        task.spawn(autoRobBank)
+    else
+        updateBankButton()
+    end
+end)
+
+LocalPlayer.CharacterAdded:Connect(function()
+    isBankRunning = false
+    updateBankButton()
+end)
+
+local TeleportSection = Instance.new("Frame")
+TeleportSection.Size = UDim2.new(1, 0, 0, 195)
+TeleportSection.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+TeleportSection.BorderSizePixel = 0
+TeleportSection.Parent = Scroll
+Instance.new("UICorner", TeleportSection).CornerRadius = UDim.new(0, 8)
+
+local TeleportHeader = Instance.new("TextLabel")
+TeleportHeader.Size = UDim2.new(1, -10, 0, 25)
+TeleportHeader.Position = UDim2.new(0, 5, 0, 5)
+TeleportHeader.BackgroundTransparency = 1
+TeleportHeader.Text = "📍 Teleports"
+TeleportHeader.TextColor3 = Color3.new(1, 1, 1)
+TeleportHeader.Font = Enum.Font.GothamBold
+TeleportHeader.TextSize = 16
+TeleportHeader.TextXAlignment = Enum.TextXAlignment.Left
+TeleportHeader.TextYAlignment = Enum.TextYAlignment.Center
+TeleportHeader.Parent = TeleportSection
+
+local CarSpawnBtn = Instance.new("TextButton")
+CarSpawnBtn.Size = UDim2.new(1, -20, 0, 30)
+CarSpawnBtn.Position = UDim2.new(0, 10, 0, 35)
+CarSpawnBtn.BackgroundColor3 = Color3.fromRGB(70, 130, 180)
+CarSpawnBtn.Text = "Car Spawn"
+CarSpawnBtn.TextColor3 = Color3.new(1, 1, 1)
+CarSpawnBtn.Font = Enum.Font.GothamSemibold
+CarSpawnBtn.TextSize = 14
+CarSpawnBtn.Parent = TeleportSection
+Instance.new("UICorner", CarSpawnBtn).CornerRadius = UDim.new(0, 6)
+
+local RoofBtn = Instance.new("TextButton")
+RoofBtn.Size = UDim2.new(1, -20, 0, 30)
+RoofBtn.Position = UDim2.new(0, 10, 0, 70)
+RoofBtn.BackgroundColor3 = Color3.fromRGB(70, 130, 180)
+RoofBtn.Text = "Roof"
+RoofBtn.TextColor3 = Color3.new(1, 1, 1)
+RoofBtn.Font = Enum.Font.GothamSemibold
+RoofBtn.TextSize = 14
+RoofBtn.Parent = TeleportSection
+Instance.new("UICorner", RoofBtn).CornerRadius = UDim.new(0, 6)
+
+local CriminalBaseBtn = Instance.new("TextButton")
+CriminalBaseBtn.Size = UDim2.new(1, -20, 0, 30)
+CriminalBaseBtn.Position = UDim2.new(0, 10, 0, 105)
+CriminalBaseBtn.BackgroundColor3 = Color3.fromRGB(70, 130, 180)
+CriminalBaseBtn.Text = "Criminal Base"
+CriminalBaseBtn.TextColor3 = Color3.new(1, 1, 1)
+CriminalBaseBtn.Font = Enum.Font.GothamSemibold
+CriminalBaseBtn.TextSize = 14
+CriminalBaseBtn.Parent = TeleportSection
+Instance.new("UICorner", CriminalBaseBtn).CornerRadius = UDim.new(0, 6)
+
+local EscapeBtn = Instance.new("TextButton")
+EscapeBtn.Size = UDim2.new(1, -20, 0, 30)
+EscapeBtn.Position = UDim2.new(0, 10, 0, 140)
+EscapeBtn.BackgroundColor3 = Color3.fromRGB(70, 130, 180)
+EscapeBtn.Text = "Escape"
+EscapeBtn.TextColor3 = Color3.new(1, 1, 1)
+EscapeBtn.Font = Enum.Font.GothamSemibold
+EscapeBtn.TextSize = 14
+EscapeBtn.Parent = TeleportSection
+Instance.new("UICorner", EscapeBtn).CornerRadius = UDim.new(0, 6)
+
+CarSpawnBtn.MouseButton1Click:Connect(function()
+    teleportToCoords(1088, -1, 2541)
+end)
+
+RoofBtn.MouseButton1Click:Connect(function()
+    teleportToCoords(862, 37, 97)
+end)
+
+CriminalBaseBtn.MouseButton1Click:Connect(function()
+    teleportToCoords(1427, 3, 2267)
+end)
+
+EscapeBtn.MouseButton1Click:Connect(function()
+    teleportToCoords(980, 2, 541)
+end)
+
+local function addHoverEffect(btn)
+    btn.MouseEnter:Connect(function()
+        TweenService:Create(btn, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(90, 150, 200)}):Play()
+    end)
+    btn.MouseLeave:Connect(function()
+        TweenService:Create(btn, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(70, 130, 180)}):Play()
+    end)
+end
+
+addHoverEffect(CarSpawnBtn)
+addHoverEffect(RoofBtn)
+addHoverEffect(CriminalBaseBtn)
+addHoverEffect(EscapeBtn)
+
 local LootSection = Instance.new("Frame")
 LootSection.Size = UDim2.new(1, 0, 0, 140)
 LootSection.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
@@ -303,9 +582,6 @@ LootCounter.Parent = LootSection
 local isLooting = false
 local collectedCount = 0
 local hasCompleted = false
-
-local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
 
 LocalPlayer.CharacterAdded:Connect(function(char)
     character = char
@@ -400,9 +676,6 @@ local function lootLoop()
                         task.wait()
                     end
                 end)
-                if not succ then
-                    warn("Proximity prompt input failed:", perr)
-                end
                 
                 if not isLooting then break end
                 
@@ -418,7 +691,6 @@ local function lootLoop()
     end)
     camera.CameraType = Enum.CameraType.Custom
     if not ok then
-        warn("lootLoop errored:", err)
         isLooting = false
         if not hasCompleted then
             LootToggle.Text = "START LOOTING"
@@ -440,7 +712,7 @@ LootToggle.MouseButton1Click:Connect(function()
     end
     if text == "START LOOTING" then
         if hasCompleted then return end
-        if isLooting then return end -- FIX: guard against double-start/race
+        if isLooting then return end
         isLooting = true
         LootToggle.Text = "STOP"
         LootToggle.BackgroundColor3 = Color3.fromRGB(170, 0, 0)
@@ -561,6 +833,18 @@ VanButton.MouseButton1Click:Connect(function()
         end
     end)
 end)
+
+local Disclaimer = Instance.new("TextLabel")
+Disclaimer.Size = UDim2.new(1, -20, 0, 30)
+Disclaimer.BackgroundTransparency = 1
+Disclaimer.Text = "⚠️ You get kicked if you teleport too much"
+Disclaimer.TextColor3 = Color3.fromRGB(255, 100, 100)
+Disclaimer.Font = Enum.Font.GothamBold
+Disclaimer.TextSize = 12
+Disclaimer.TextWrapped = true
+Disclaimer.TextXAlignment = Enum.TextXAlignment.Center
+Disclaimer.TextYAlignment = Enum.TextYAlignment.Center
+Disclaimer.Parent = Scroll
 
 ListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
     Scroll.CanvasSize = UDim2.new(0, 0, 0, ListLayout.AbsoluteContentSize.Y + 20)
