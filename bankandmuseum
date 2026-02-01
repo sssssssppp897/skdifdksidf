@@ -1,0 +1,403 @@
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+local camera = workspace.CurrentCamera
+
+local CONFIG = {
+    SPAM_DELAY = 0.02,
+    PROCESS_DURATION = 0.3,
+    CHECK_LOAD_TIME = 2,
+    COOLDOWN_TIME = 10,
+    STARTUP_WAIT_1 = 1,
+    STARTUP_WAIT_2 = 2,
+    LOAD_DISTANCE_THRESHOLD = 200,
+    LOAD_WAIT_TIME = 2,
+    BUTTON_MONEY_WAIT = 15,
+}
+
+local isRunning = false
+local startupComplete = false
+
+-- GUI Setup
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "BankAuto"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = player:WaitForChild("PlayerGui")
+
+local button = Instance.new("TextButton")
+button.Size = UDim2.new(0, 140, 0, 50)
+button.Position = UDim2.new(0, 20, 0.5, -25)
+button.BackgroundColor3 = Color3.fromRGB(46, 204, 113)
+button.Text = "START AUTO"
+button.TextColor3 = Color3.new(1, 1, 1)
+button.TextSize = 18
+button.Font = Enum.Font.SourceSansBold
+button.Parent = screenGui
+
+Instance.new("UICorner", button).CornerRadius = UDim.new(0, 6)
+
+function updateButton()
+    if isRunning then
+        button.BackgroundColor3 = Color3.fromRGB(231, 76, 60)
+        button.Text = "STOP"
+    else
+        button.BackgroundColor3 = Color3.fromRGB(46, 204, 113)
+        button.Text = "START AUTO"
+    end
+end
+
+function resetCamera()
+    camera.CameraType = Enum.CameraType.Custom
+end
+
+-- Ensure HRP exists (handles death)
+local function getHRP()
+    local char = player.Character
+    if char then
+        return char:FindFirstChild("HumanoidRootPart")
+    end
+    return nil
+end
+
+local function ensureHRP()
+    while isRunning do
+        local hrp = getHRP()
+        if hrp then return hrp end
+        task.wait(0.1)
+    end
+    return nil
+end
+
+-- Teleport to coordinates with 200-stud load check
+local function tpCoords(pos)
+    local hrp = ensureHRP()
+    if not hrp then return false end
+    
+    local currentPos = hrp.Position
+    local distance = (currentPos - pos).Magnitude
+    
+    hrp.CFrame = CFrame.new(pos.X, pos.Y, pos.Z)
+    
+    if distance > CONFIG.LOAD_DISTANCE_THRESHOLD then
+        button.Text = "LOADING..."
+        task.wait(CONFIG.LOAD_WAIT_TIME)
+    end
+    
+    return true
+end
+
+-- Teleport to part with camera lock
+local function tpToPart(part)
+    local hrp = ensureHRP()
+    if not hrp or not part then return false end
+    
+    hrp.CFrame = CFrame.new(part.Position + Vector3.new(0, 3, 0))
+    camera.CameraType = Enum.CameraType.Scriptable
+    camera.CFrame = CFrame.new(part.Position + Vector3.new(0, 4, 0), part.Position)
+    
+    return true
+end
+
+local function firePrompt(prompt)
+    if not prompt or not prompt:IsA("ProximityPrompt") then return end
+    prompt:InputHoldBegin()
+    prompt:InputHoldEnd()
+end
+
+-- Spam for fixed duration (0.2s)
+local function spamPrompt(prompt)
+    if not prompt then return end
+    local start = tick()
+    while isRunning and (tick() - start) < CONFIG.PROCESS_DURATION do
+        firePrompt(prompt)
+        task.wait(CONFIG.SPAM_DELAY)
+    end
+end
+
+-- Get Bank Button
+local function getBankButton()
+    local bank = workspace:FindFirstChild("BANK")
+    if not bank then return nil, nil end
+    local panel = bank:FindFirstChild("ButtonPanel")
+    if not panel then return nil, nil end
+    local pPart = panel:FindFirstChild("PromptPart")
+    if not pPart then return nil, nil end
+    return pPart:FindFirstChild("ProximityPrompt"), pPart
+end
+
+-- Get NEAREST Money Box
+local function getNearestMoney()
+    local bank = workspace:FindFirstChild("BANK")
+    if not bank then return nil, nil end
+    local boxes = bank:FindFirstChild("MoneyBoxes")
+    if not boxes then return nil, nil end
+    
+    local hrp = getHRP()
+    if not hrp then return nil, nil end
+    
+    local hrpPos = hrp.Position
+    local nearestPrompt, nearestPart, shortestDist = nil, nil, math.huge
+    
+    for _, box in ipairs(boxes:GetChildren()) do
+        local pp = box:FindFirstChild("PromptPart")
+        if pp then
+            local prompt = pp:FindFirstChild("ProximityPrompt")
+            if prompt and prompt.Enabled then
+                local dist = (hrpPos - pp.Position).Magnitude
+                if dist < shortestDist then
+                    shortestDist = dist
+                    nearestPrompt = prompt
+                    nearestPart = pp
+                end
+            end
+        end
+    end
+    return nearestPrompt, nearestPart
+end
+
+-- Check if museum is accessible (no door blocking)
+local function isMuseumOpen()
+    local museum = workspace:FindFirstChild("MUSEUM")
+    if not museum then return false end
+    if museum:FindFirstChild("MuseumDoor") then
+        return false
+    end
+    return true
+end
+
+-- Get NEAREST Museum Art
+local function getNearestArt()
+    local museum = workspace:FindFirstChild("MUSEUM")
+    if not museum then return nil, nil end
+    local artFolder = museum:FindFirstChild("Art")
+    if not artFolder then return nil, nil end
+    
+    local hrp = getHRP()
+    if not hrp then return nil, nil end
+    
+    local hrpPos = hrp.Position
+    local nearestPrompt, nearestPart, shortestDist = nil, nil, math.huge
+    
+    for _, artModel in ipairs(artFolder:GetChildren()) do
+        local mainPart = artModel:FindFirstChild("MainPart")
+        if mainPart then
+            local prompt = mainPart:FindFirstChild("ProximityPrompt")
+            if prompt and prompt.Enabled then
+                local dist = (hrpPos - mainPart.Position).Magnitude
+                if dist < shortestDist then
+                    shortestDist = dist
+                    nearestPrompt = prompt
+                    nearestPart = mainPart
+                end
+            end
+        end
+    end
+    return nearestPrompt, nearestPart
+end
+
+-- Process a robbery target
+local function processTarget(part, prompt, targetType)
+    if not isRunning then return end
+    
+    local originalHold = prompt.HoldDuration
+    prompt.HoldDuration = 0
+    
+    tpToPart(part)
+    spamPrompt(prompt)
+    
+    if prompt.Parent then
+        prompt.HoldDuration = originalHold
+    end
+end
+
+-- Cooldown sequence
+local function doCooldown(nextCheckCoord)
+    if not isRunning then return end
+    
+    resetCamera()
+    tpCoords(Vector3.new(1034, -2, 174))
+    button.Text = "COOLDOWN"
+    task.wait(CONFIG.COOLDOWN_TIME)
+    
+    if not isRunning then return end
+    tpCoords(nextCheckCoord)
+    task.wait(CONFIG.CHECK_LOAD_TIME)
+end
+
+-- Rob Museum (shared function for both entry points)
+local function robMuseum()
+    if not isRunning then return end
+    
+    if isMuseumOpen() then
+        button.Text = "CHECK MUSEUM"
+        
+        -- Process ALL art pieces (nearest first, recalculating each time)
+        while isRunning do
+            local artPrompt, artPart = getNearestArt()
+            
+            if not artPrompt then 
+                break -- No more art
+            end
+            
+            button.Text = "ROBBING ART"
+            processTarget(artPart, artPrompt, "ART")
+            task.wait()
+        end
+        
+        -- After robbing all art: Cooldown then back to Bank
+        if isRunning then
+            doCooldown(Vector3.new(917, 3, 2589))
+        end
+    else
+        -- Museum door exists, skip and go back to bank
+        button.Text = "DOOR CLOSED"
+        task.wait(1)
+        doCooldown(Vector3.new(917, 3, 2589))
+    end
+end
+
+-- Main Logic
+local function autoRob()
+    -- INITIAL STARTUP (Once only)
+    if not startupComplete then
+        button.Text = "STARTUP"
+        
+        tpCoords(Vector3.new(980, 2, 541))
+        task.wait(CONFIG.STARTUP_WAIT_1)
+        
+        if isRunning then
+            tpCoords(Vector3.new(917, 3, 2589))
+            task.wait(CONFIG.STARTUP_WAIT_2)
+        end
+        
+        startupComplete = true
+    end
+    
+    -- Main alternating loop
+    while isRunning do
+        -- Check Bank: Check for Button OR Money
+        button.Text = "CHECK BANK"
+        tpCoords(Vector3.new(917, 3, 2589))
+        task.wait(CONFIG.CHECK_LOAD_TIME)
+        
+        local btnPrompt, btnPart = getBankButton()
+        local moneyPromptCheck = getNearestMoney() -- Just to check if any exist
+        
+        -- If button enabled OR money exists, enter bank robbery mode
+        if (btnPrompt and btnPrompt.Enabled) or moneyPromptCheck then
+            button.Text = "BANK ACTIVE"
+            
+            -- Process button if available
+            if btnPrompt and btnPrompt.Enabled then
+                button.Text = "ROBBING BANK"
+                processTarget(btnPart, btnPrompt, "BANK")
+                
+                -- MONEY COLLECTION MODE: Stay for minimum 10 seconds
+                local buttonPressTime = tick()
+                
+                while isRunning do
+                    local timeSinceButton = tick() - buttonPressTime
+                    
+                    -- Recalculate NEAREST money every iteration
+                    local currentMoney, currentPart = getNearestMoney()
+                    
+                    if currentMoney then
+                        -- Found money, rob the nearest one
+                        button.Text = "ROBBING MONEY"
+                        processTarget(currentPart, currentMoney, "MONEY")
+                        task.wait()
+                        -- Continue loop (don't break, keep collecting)
+                    else
+                        -- No money currently available
+                        if timeSinceButton >= CONFIG.BUTTON_MONEY_WAIT then
+                            -- 10 seconds passed and no money, can leave
+                            break
+                        else
+                            -- Less than 10s passed, must stay and wait
+                            button.Text = "WAIT " .. math.ceil(CONFIG.BUTTON_MONEY_WAIT - timeSinceButton)
+                            task.wait(0.5)
+                        end
+                    end
+                end
+            else
+                -- No button, but money exists - rob all money immediately (no 10s constraint)
+                while isRunning do
+                    local currentMoney, currentPart = getNearestMoney()
+                    if not currentMoney then break end
+                    
+                    button.Text = "ROBBING MONEY"
+                    processTarget(currentPart, currentMoney, "MONEY")
+                    task.wait()
+                end
+            end
+            
+            -- Finished with bank stuff, cooldown to museum
+            if isRunning then
+                doCooldown(Vector3.new(109, 3, 1866))
+                robMuseum()
+            end
+            
+        else
+            -- Nothing at bank, go directly to museum (no cooldown needed yet)
+            button.Text = "CHECK MUSEUM"
+            tpCoords(Vector3.new(109, 3, 1866))
+            task.wait(CONFIG.CHECK_LOAD_TIME)
+            
+            if isMuseumOpen() then
+                local artPrompt, artPart = getNearestArt()
+                
+                if artPrompt then
+                    button.Text = "ROBBING ART"
+                    processTarget(artPart, artPrompt, "ART")
+                    
+                    -- Process remaining art (nearest each time)
+                    while isRunning do
+                        local nextArtPrompt, nextArtPart = getNearestArt()
+                        if not nextArtPrompt then break end
+                        
+                        button.Text = "ROBBING ART"
+                        processTarget(nextArtPart, nextArtPrompt, "ART")
+                        task.wait()
+                    end
+                    
+                    -- Cooldown back to Bank
+                    doCooldown(Vector3.new(917, 3, 2589))
+                else
+                    -- Nothing at museum either
+                    button.Text = "EMPTY"
+                    task.wait(2)
+                    doCooldown(Vector3.new(917, 3, 2589))
+                end
+            else
+                -- Door blocked, cooldown back to bank
+                button.Text = "DOOR BLOCKED"
+                task.wait(1)
+                doCooldown(Vector3.new(917, 3, 2589))
+            end
+        end
+    end
+    
+    resetCamera()
+    updateButton()
+    button.Text = "START AUTO"
+end
+
+-- Toggle
+button.MouseButton1Click:Connect(function()
+    isRunning = not isRunning
+    
+    if isRunning then
+        updateButton()
+        task.spawn(autoRob)
+    else
+        updateButton()
+        resetCamera()
+    end
+end)
+
+-- Handle death - reset camera and ensure HRP reference
+player.CharacterAdded:Connect(function(char)
+    resetCamera()
+    task.spawn(function()
+        char:WaitForChild("HumanoidRootPart", 5)
+    end)
+end)
