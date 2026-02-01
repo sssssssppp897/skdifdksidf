@@ -11,7 +11,7 @@ local CONFIG = {
     STARTUP_WAIT_2 = 2,
     LOAD_DISTANCE_THRESHOLD = 200,
     LOAD_WAIT_TIME = 2,
-    BUTTON_MONEY_WAIT = 15,
+    BUTTON_MONEY_WAIT = 25,
 }
 
 local isRunning = false
